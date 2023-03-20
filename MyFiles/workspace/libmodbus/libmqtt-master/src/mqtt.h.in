@@ -1,0 +1,159 @@
+#ifndef mqtt_h__included
+#define mqtt_h__included
+
+// re-define to 1 to enable server functionality
+#ifndef MQTT_SERVER
+# define MQTT_SERVER 0
+#endif
+
+// re-rdefine to 0 to disable client functionality
+#ifndef MQTT_CLIENT
+# define MQTT_CLIENT 1
+#endif
+
+#define LIBMQTT_VERSION_MAJOR @LIBMQTT_VERSION_MAJOR@
+#define LIBMQTT_VERSION_MINOR @LIBMQTT_VERSION_MINOR@
+
+#ifdef __cplusplus
+extern "C" {
+#endif /* __cplusplus */
+
+#if MSVC
+#define API __declspec(dllexport)
+#else
+#define API __attribute__((visibility("default")))
+#endif
+
+#include <stdint.h>
+#include <stdbool.h>
+
+
+typedef struct _MQTTHandle MQTTHandle;
+
+typedef struct {
+    char *hostname;  /**< Hostname to connect to, will do DNS resolution */
+    uint16_t port;   /**< Port the broker listens on, set to 0 for 1883 default */
+
+    char *client_id; /**< Client identification */
+    bool clean_session; /**< Set to true to reset the session on reconnect */
+
+    char *username;  /**< User name, set to NULL to connect anonymously */
+    char *password;  /**< Password, set to NULL to connect without password */
+
+    char *last_will_topic;   /**< last will topic that is automatically published on connection loss */
+    char *last_will_message; /**< last will message */
+    bool last_will_retain;   /**< tell server to retain last will message */
+} MQTTConfig;
+
+typedef enum {
+    MQTT_STATUS_OK = 0, /**< All ok, no error */
+    MQTT_STATUS_ERROR   /**< Error, action did not succeed, error handler will be called */
+} MQTTStatus;
+
+typedef enum {
+    MQTT_QOS_0 = 0, /**< At most once, drop message if nobody is listening, no ACK */
+    MQTT_QOS_1,     /**< At least once, wait for ACK from broker */
+    MQTT_QOS_2,     /**< Exactly once, do triple way handshake with broker */
+} MQTTQosLevel;
+
+typedef enum {
+    MQTT_Error_Internal,               /**< Internal error */
+    MQTT_Error_Host_Not_Found,         /**< Host could not be resolved */
+    MQTT_Error_Connection_Refused,     /**< Connection was refused, wrong port? */
+    MQTT_Error_Broker_Disconnected,    /**< Broker went down, perhaps restart? */
+    MQTT_Error_Authentication,         /**< Authentication error, wrong or missing username/password? */
+    MQTT_Error_Protocol_Not_Supported, /**< Broker does not speak MQTT protocol 3.1.1 (aka version 4) */
+    MQTT_Error_Connection_Reset        /**< Network connection reset, perhaps network went down? */
+} MQTTErrorCode;
+
+/** Error handler callback
+ *
+ * Return true if the handle should be freed, false to keep it
+ */
+typedef bool (*MQTTErrorHandler)(MQTTHandle *handle, MQTTConfig *config, MQTTErrorCode code);
+
+/** Event handler callback */
+typedef void (*MQTTEventHandler)(MQTTHandle *handle, void *context);
+
+/** publish event callback */
+typedef void (*MQTTPublishEventHandler)(MQTTHandle *handle, char *topic, char *payload);
+
+/**
+ * Connect to MQTT broker
+ *
+ * @param config: MQTT configuration
+ * @param callback: Success callback
+ * @param callback_context: Context pointer for the callback
+ * @param error_callback: Callback function to call on errors
+ * @returns handle to mqtt connection or NULL on error
+ *
+ * If the error handler is called with Host not found or Connection refused,
+ * the handler is in charge of freeing the handle by returning true
+ * or re-trying by changing settings and calling mqtt_reconnect() and returning false
+ */
+API MQTTHandle *mqtt_connect(MQTTConfig *config, MQTTEventHandler callback, void *callback_context, MQTTErrorHandler error_callback);
+
+/**
+ * Re-Connect to MQTT broker
+ *
+ * Usually called in the MQTTErrorHandler callback, if called on a working
+ * connection the connection will be disconnected before reconnecting.
+ *
+ * If there were registered subscriptions they will be re-instated after
+ * a successful reconnect.
+ *
+ * @param handle: MQTT Handle from `mqtt_connect`
+ * @param callback: Success callback
+ * @param callback_context: Context pointer for the callback
+ * @returns: Status code
+ */
+API MQTTStatus mqtt_reconnect(MQTTHandle *handle, MQTTEventHandler callback, void *callback_context);
+
+/**
+ * Subscribe to a topic
+ *
+ * @param handle: MQTT Handle from `mqtt_connect`
+ * @param topic: Topic to subscribe
+ * @param qos_level: Maximum qos level to subscribe to
+ * @param callback: Callback function to call when receiving something for that topic
+ * @returns: Status code
+ */
+API MQTTStatus mqtt_subscribe(MQTTHandle *handle, char *topic, MQTTQosLevel qos_level, MQTTPublishEventHandler callback);
+
+/**
+ * Un-Subscribe from a topic
+ *
+ * @param handle: MQTT Handle from `mqtt_connect`
+ * @param topic: Topic to unsubscribe
+ * @returns: Status code
+ */
+API MQTTStatus mqtt_unsubscribe(MQTTHandle *handle, char *topic);
+
+/**
+ * Publish something to the broker
+ *
+ * @param handle: MQTT Handle from `mqtt_connect`
+ * @param topic: Topic to publish to
+ * @param payload: Message payload to publish
+ * @param qos_level: QoS level to use
+ * @param callback: finish callback
+ * @returns: Status code
+ */
+API MQTTStatus mqtt_publish(MQTTHandle *handle, char *topic, char *payload, MQTTQosLevel qos_level, MQTTPublishEventHandler callback);
+
+/**
+ * Disconnect from MQTT broker
+ *
+ * @param handle: MQTT Handle from `mqtt_connect`
+ * @returns: Status code
+ *
+ * @attention: do not use the handle after calling this function,
+ *             all resources will be freed, this handle is now invalid!
+ */
+API MQTTStatus mqtt_disconnect(MQTTHandle *handle, MQTTEventHandler callback, void *callback_context);
+
+#ifdef __cplusplus
+}
+#endif /* __cplusplus */
+
+#endif /* mqtt_h__included */
